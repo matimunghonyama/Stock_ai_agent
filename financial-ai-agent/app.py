@@ -117,7 +117,7 @@ def create_metrics_chart(metrics: dict) -> go.Figure:
 
 
 def init_session_state():
-    """Initialize session state variables"""
+    """Initialize session state variables with agent-aware state management"""
     if 'orchestrator' not in st.session_state:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
@@ -126,9 +126,18 @@ def init_session_state():
 
         client = groq.Groq(api_key=api_key)
         st.session_state.orchestrator = AgentOrchestrator(client)
-    
+
     if 'history' not in st.session_state:
         st.session_state.history = []
+
+    # Agent-aware state tracking
+    if 'agent_state' not in st.session_state:
+        st.session_state.agent_state = {
+            "current_mode": None,
+            "constraints_active": False,
+            "recovery_mode": False,
+            "last_constraint_message": None
+        }
 
 
 def main():
@@ -164,9 +173,39 @@ def main():
         st.subheader(" Session Stats")
         st.metric("Total Analyses", len(st.session_state.history))
         st.metric("Current Mode", mode.split()[1])
-        
+
+        # Agent-aware state display
+        if hasattr(st.session_state.orchestrator, 'get_session_context'):
+            session_ctx = st.session_state.orchestrator.get_session_context()
+            with st.expander("🤖 Agent State", expanded=False):
+                st.metric("Interaction Count", session_ctx.get("interaction_count", 0))
+                if session_ctx.get("constraints"):
+                    st.warning(f"Active Constraints: {len(session_ctx['constraints'])}")
+                    for constraint in session_ctx["constraints"]:
+                        st.caption(f"• {constraint}")
+
+                # Show agent recovery attempts
+                if hasattr(st.session_state.orchestrator.company_agent, 'analysis_state'):
+                    recovery_attempts = st.session_state.orchestrator.company_agent.analysis_state.get("recovery_attempts", 0)
+                    if recovery_attempts > 0:
+                        st.info(f"Recovery Attempts: {recovery_attempts} (Agent learning from constraints)")
+
+                # Show current agent mode
+                current_mode = session_ctx.get("current_mode")
+                if current_mode:
+                    st.success(f"Current Mode: {current_mode}")
+
         if st.button(" Clear History"):
             st.session_state.history = []
+            # Reset agent state
+            if hasattr(st.session_state.orchestrator, 'reset_session'):
+                st.session_state.orchestrator.reset_session()
+            st.session_state.agent_state = {
+                "current_mode": None,
+                "constraints_active": False,
+                "recovery_mode": False,
+                "last_constraint_message": None
+            }
             st.rerun()
     
     # Main Content
@@ -265,9 +304,30 @@ def main():
         
         st.markdown(f"**Query:** _{latest['query']}_")
         
-        # Response
+        # Response with agent-aware display
         with st.container():
+            # Show constraint warning if applicable
+            if latest.get('constraints_active', False):
+                st.warning(" **Analysis Constraints Active**: This analysis is based on limited information. Consider gathering more data for comprehensive insights.")
+
             st.markdown(latest['response'])
+
+            # Show recovery suggestions if in constraint mode
+            if st.session_state.agent_state.get("recovery_mode", False):
+                with st.expander("💡 Recovery Suggestions", expanded=False):
+                    st.markdown("""
+                    **To improve analysis quality:**
+
+                    1. **Gather Current Data**: Use web search for recent financial statements
+                    2. **Check Multiple Sources**: Cross-reference information from Yahoo Finance, Seeking Alpha, Bloomberg
+                    3. **Upload Documents**: Provide PDF reports or earnings presentations
+                    4. **Specify Requirements**: Be more specific about what aspects you want analyzed
+
+                    **Quick Actions:**
+                    - Try web search for the company name + "financials"
+                    - Look for recent earnings presentations
+                    - Check analyst reports and ratings
+                    """)
         
         # Visualizations
         json_data = extract_json_from_response(latest['response'])

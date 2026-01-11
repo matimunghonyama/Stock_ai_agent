@@ -13,16 +13,25 @@ from .research_recommender import ResearchRecommenderAgent
 
 
 class AgentOrchestrator:
-    """Main orchestration class that classifies intent and routes to specialist agents"""
+    """Main orchestration class that classifies intent and routes to specialist agents with state management"""
 
     def __init__(self, client: groq.Groq):
         self.client = client
         self.model = "llama-3.3-70b-versatile"
-        
+
         # Initialize specialist agents
         self.pdf_agent = PDFAnalyzerAgent(client)
         self.company_agent = CompanyAnalyzerAgent(client)
         self.research_agent = ResearchRecommenderAgent(client)
+
+        # Agent-aware state management
+        self.session_state = {
+            "current_mode": None,
+            "last_intent": None,
+            "agent_states": {},
+            "interaction_history": [],
+            "constraints_identified": []
+        }
     
     def classify_intent(self, user_query: str) -> Dict:
         """
@@ -116,3 +125,90 @@ If the question is about a specific analysis or research, guide the user on how 
             }]
         )
         return response.choices[0].message.content
+
+    def update_session_state(self, intent_data: Dict, response: str):
+        """
+        Update session state based on interaction
+
+        Args:
+            intent_data: Intent classification result
+            response: Agent response
+        """
+        self.session_state["last_intent"] = intent_data.get("intent")
+        self.session_state["interaction_history"].append({
+            "intent": intent_data,
+            "response_length": len(response),
+            "timestamp": "current"
+        })
+
+        # Update agent states
+        if hasattr(self.company_agent, 'get_analysis_state'):
+            self.session_state["agent_states"]["company_analyzer"] = self.company_agent.get_analysis_state()
+
+    def get_session_context(self) -> Dict:
+        """
+        Get current session context for agent awareness
+
+        Returns:
+            Session context dictionary
+        """
+        return {
+            "current_mode": self.session_state["current_mode"],
+            "last_intent": self.session_state["last_intent"],
+            "interaction_count": len(self.session_state["interaction_history"]),
+            "constraints": self.session_state["constraints_identified"],
+            "agent_states": self.session_state["agent_states"]
+        }
+
+    def handle_constraint_scenario(self, intent_data: Dict, query: str) -> str:
+        """
+        Handle scenarios where agents identify constraints
+
+        Args:
+            intent_data: Intent classification result
+            query: Original user query
+
+        Returns:
+            Recovery response with clear guidance
+        """
+        intent = intent_data.get("intent", "general_query")
+
+        if intent == "company_analysis":
+            # Check if company agent has identified constraints
+            if hasattr(self.company_agent, 'get_analysis_state'):
+                agent_state = self.company_agent.get_analysis_state()
+                if agent_state.get("missing_info"):
+                    return self.company_agent.generate_recovery_response(
+                        query,
+                        {
+                            "companies_found": [],
+                            "companies_missing": agent_state["missing_info"],
+                            "constraints": [f"No data available for {company}" for company in agent_state["missing_info"]]
+                        }
+                    )
+
+        # Default constraint handling
+        return f"""## Analysis Constraints Detected
+
+I need additional information to provide a complete analysis for your query: "{query}"
+
+**Possible approaches:**
+1. **Provide more context** about the companies or topic
+2. **Use web search** to gather current market data
+3. **Upload relevant documents** (PDFs, reports) for analysis
+4. **Specify the type of analysis** you need (company analysis, research guidance, etc.)
+
+What specific information would you like me to help you find or analyze?"""
+
+    def reset_session(self):
+        """Reset session state for new conversations"""
+        self.session_state = {
+            "current_mode": None,
+            "last_intent": None,
+            "agent_states": {},
+            "interaction_history": [],
+            "constraints_identified": []
+        }
+        # Reset individual agent states
+        if hasattr(self.company_agent, 'reset_state'):
+            self.company_agent.reset_state()

@@ -56,6 +56,11 @@ def test_agent_initialization():
             return False
 
         import groq
+        from agents.orchestrator import AgentOrchestrator
+        from agents.pdf_analyzer import PDFAnalyzerAgent
+        from agents.company_analyzer import CompanyAnalyzerAgent
+        from agents.research_recommender import ResearchRecommenderAgent
+
         client = groq.Groq(api_key=api_key)
 
         # Test orchestrator
@@ -87,6 +92,8 @@ def test_intent_classification():
             return False
 
         import groq
+        from agents.orchestrator import AgentOrchestrator
+
         client = groq.Groq(api_key=api_key)
 
         orchestrator = AgentOrchestrator(client)
@@ -110,6 +117,8 @@ def test_company_analysis():
             return False
 
         import groq
+        from agents.company_analyzer import CompanyAnalyzerAgent
+
         client = groq.Groq(api_key=api_key)
 
         agent = CompanyAnalyzerAgent(client)
